@@ -1,0 +1,1006 @@
+<!-- STREAMING_CHUNK:Khởi tạo cấu trúc HTML và nạp thư viện... -->
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mô phỏng Mạch Chỉnh Lưu Cầu - Bảng mạch A1-3b</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- STREAMING_CHUNK:Cấu hình CSS và hiệu ứng... -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; background-color: #f0f4f8; }
+        
+        /* Oscilloscope screen styles */
+        .osc-screen {
+            background-color: #002200;
+            border-radius: 8px;
+            box-shadow: inset 0 0 20px rgba(0,0,0,0.8);
+            position: relative;
+            overflow: hidden;
+        }
+        .osc-grid {
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: 
+                linear-gradient(rgba(0, 255, 0, 0.2) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 255, 0, 0.2) 1px, transparent 1px);
+            background-size: 10% 10%;
+            pointer-events: none;
+        }
+        .osc-center-line {
+            position: absolute;
+            top: 50%; left: 0; right: 0;
+            border-top: 1px solid rgba(0, 255, 0, 0.5);
+            pointer-events: none;
+        }
+        .osc-center-vline {
+            position: absolute;
+            top: 0; bottom: 0; left: 50%;
+            border-left: 1px solid rgba(0, 255, 0, 0.5);
+            pointer-events: none;
+        }
+
+        /* SVG Circuit Animations */
+        .curr-red-fwd { stroke: #ef4444 !important; stroke-width: 3; stroke-dasharray: 6; animation: dash-fwd 0.8s linear infinite; }
+        .curr-red-rev { stroke: #ef4444 !important; stroke-width: 3; stroke-dasharray: 6; animation: dash-rev 0.8s linear infinite; }
+        .curr-blue-fwd { stroke: #3b82f6 !important; stroke-width: 3; stroke-dasharray: 6; animation: dash-fwd 0.8s linear infinite; }
+        .curr-blue-rev { stroke: #3b82f6 !important; stroke-width: 3; stroke-dasharray: 6; animation: dash-rev 0.8s linear infinite; }
+        .curr-short { stroke: #ff0000 !important; stroke-width: 4; stroke-dasharray: 8; animation: dash-fwd 0.3s linear infinite; filter: drop-shadow(0 0 4px red); }
+
+        @keyframes dash-fwd { to { stroke-dashoffset: -12; } }
+        @keyframes dash-rev { to { stroke-dashoffset: 12; } }
+
+        /* Fault warning flash */
+        @keyframes flash-red {
+            0%, 100% { background-color: transparent; }
+            50% { background-color: rgba(255, 0, 0, 0.2); }
+        }
+        .flash-warning { animation: flash-red 0.5s ease-in-out infinite; }
+        
+        .fault-diode { stroke: red !important; opacity: 0.4; }
+        .shorted-diode line { stroke-width: 4 !important; stroke: red !important; }
+
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #777; }
+    </style>
+
+    <!-- STREAMING_CHUNK:Cấu hình MathJax... -->
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']],
+                processEscapes: true
+            },
+            startup: {
+                typeset: false
+            }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body class="h-screen w-screen overflow-hidden flex flex-col">
+
+    <!-- STREAMING_CHUNK:Xây dựng giao diện Header... -->
+    <!-- Header -->
+    <header class="bg-blue-900 text-white p-4 shadow-md flex justify-between items-center shrink-0 z-20 relative">
+        <div class="flex items-center gap-3">
+            <svg class="w-8 h-8 text-blue-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+            <h1 class="text-xl font-bold">Thực hành: Mạch chỉnh lưu cầu dùng Diode (A1-3b)</h1>
+        </div>
+        <div class="text-sm bg-blue-800 px-4 py-1.5 rounded-full border border-blue-700 font-medium">
+            Môn học: Điện tử tương tự
+        </div>
+    </header>
+
+    <!-- STREAMING_CHUNK:Xây dựng thanh bên hướng dẫn các bước... -->
+    <!-- Main Content -->
+    <div class="flex-1 flex overflow-hidden relative">
+        <!-- Cảnh báo chập mạch toàn màn hình -->
+        <div id="short-circuit-overlay" class="absolute inset-0 z-50 pointer-events-none hidden">
+            <div class="w-full h-full flash-warning flex items-center justify-center">
+                <div class="bg-red-600 text-white px-8 py-4 rounded-xl font-bold text-3xl shadow-[0_0_30px_red] border-4 border-red-800 tracking-wider">
+                    ⚠️ CẢNH BÁO: NGẮN MẠCH NGUỒN AC!
+                </div>
+            </div>
+        </div>
+
+        <!-- Left Sidebar: Steps -->
+        <div class="w-1/4 bg-white border-r border-gray-200 shadow-sm flex flex-col shrink-0 overflow-y-auto z-10 relative">
+            <div class="p-4 bg-gray-50 border-b border-gray-200 sticky top-0 z-20">
+                <h2 class="text-lg font-bold text-gray-800">Các bước tiến hành</h2>
+                <p class="text-xs text-gray-500 mt-1">Hoàn thành lần lượt từng bước</p>
+            </div>
+            
+            <div class="p-4 space-y-5 relative" id="steps-container">
+                <!-- Line connecting steps -->
+                <div class="absolute left-8 top-10 bottom-10 w-1 bg-gray-200 -z-10 rounded-full"></div>
+
+                <!-- Step 1 -->
+                <div class="step-card flex gap-4 cursor-pointer opacity-100 transition-opacity" id="step-1" onclick="app.selectStep(1)">
+                    <div class="step-num w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center font-bold shadow-md shrink-0">1</div>
+                    <div class="bg-white border-2 border-blue-600 rounded-lg p-3 w-full shadow-sm">
+                        <p class="text-sm font-semibold text-gray-800">Lắp mạch chỉnh lưu cầu diode theo sơ đồ bảng mạch A1-3b.</p>
+                        <button id="btn-step-1" class="mt-2 text-xs bg-blue-100 hover:bg-blue-200 text-blue-700 font-medium py-1.5 px-3 rounded w-full transition-colors" onclick="app.completeStep(1, event)">Xác nhận sơ đồ</button>
+                    </div>
+                </div>
+
+                <!-- Step 2 -->
+                <div class="step-card flex gap-4 cursor-not-allowed opacity-50 transition-opacity" id="step-2">
+                    <div class="step-num w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold shadow-md shrink-0">2</div>
+                    <div class="bg-white border border-gray-200 rounded-lg p-3 w-full">
+                        <p class="text-sm font-semibold text-gray-800">Kiểm tra các kết nối, đảm bảo đúng cực của diode.</p>
+                        <button id="btn-step-2" class="mt-2 text-xs bg-gray-100 text-gray-400 font-medium py-1.5 px-3 rounded w-full cursor-not-allowed" onclick="app.completeStep(2, event)" disabled>Kiểm tra Diode</button>
+                    </div>
+                </div>
+
+                <!-- Step 3 -->
+                <div class="step-card flex gap-4 cursor-not-allowed opacity-50 transition-opacity" id="step-3">
+                    <div class="step-num w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold shadow-md shrink-0">3</div>
+                    <div class="bg-white border border-gray-200 rounded-lg p-3 w-full">
+                        <p class="text-sm font-semibold text-gray-800">Cấp nguồn xoay chiều 9V AC vào hai đầu vào của cầu diode.</p>
+                        <div class="mt-3 flex items-center justify-between bg-gray-50 p-2 rounded border border-gray-100">
+                            <span class="text-xs text-gray-700 font-bold">Nguồn AC:</span>
+                            <label class="relative inline-flex items-center cursor-not-allowed">
+                                <input type="checkbox" id="switch-power" class="sr-only peer" disabled onchange="app.togglePower()">
+                                <div class="w-9 h-5 bg-gray-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-red-500"></div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 4 -->
+                <div class="step-card flex gap-4 cursor-not-allowed opacity-50 transition-opacity" id="step-4">
+                    <div class="step-num w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold shadow-md shrink-0">4</div>
+                    <div class="bg-white border border-gray-200 rounded-lg p-3 w-full">
+                        <p class="text-sm font-semibold text-gray-800">Đóng chốt T để kết nối tải và oscilloscope vào đầu ra của mạch.</p>
+                        <div class="mt-3 flex items-center justify-between">
+                            <span class="text-xs text-gray-600 font-medium">Chốt T:</span>
+                            <button id="btn-toggle-t" class="text-xs bg-gray-200 text-gray-500 font-bold py-1.5 px-3 rounded cursor-not-allowed shadow-sm" onclick="app.toggleSwitchT()" disabled>MỞ (Hở mạch)</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 5 -->
+                <div class="step-card flex gap-4 cursor-not-allowed opacity-50 transition-opacity" id="step-5">
+                    <div class="step-num w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold shadow-md shrink-0">5</div>
+                    <div class="bg-white border border-gray-200 rounded-lg p-3 w-full">
+                        <p class="text-sm font-semibold text-gray-800">Quan sát dạng sóng và đồng hồ đo điện áp hiệu dụng đầu vào/ra.</p>
+                        <div class="mt-3 flex gap-2">
+                            <button id="btn-ch1" class="flex-1 text-xs bg-gray-100 text-gray-400 font-bold py-1.5 rounded border border-gray-300 cursor-not-allowed transition-all" onclick="app.toggleChannel(1)" disabled>CH1 (Vào)</button>
+                            <button id="btn-ch2" class="flex-1 text-xs bg-gray-100 text-gray-400 font-bold py-1.5 rounded border border-gray-300 cursor-not-allowed transition-all" onclick="app.toggleChannel(2)" disabled>CH2 (Ra)</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step 6 -->
+                <div class="step-card flex gap-4 cursor-not-allowed opacity-50 transition-opacity" id="step-6">
+                    <div class="step-num w-8 h-8 rounded-full bg-gray-300 text-gray-600 flex items-center justify-center font-bold shadow-md shrink-0">6</div>
+                    <div class="bg-white border border-gray-200 rounded-lg p-3 w-full">
+                        <p class="text-sm font-semibold text-gray-800">Ghi lại giá trị biên độ, chu kỳ và đặc điểm dạng sóng.</p>
+                        <button id="btn-step-6" class="mt-3 text-xs bg-gray-100 text-gray-400 font-medium py-1.5 px-3 rounded w-full cursor-not-allowed shadow-sm transition-colors" onclick="app.showResults(event)" disabled>Xem kết quả phân tích</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- STREAMING_CHUNK:Vẽ sơ đồ mạch bằng SVG... -->
+        <!-- Right Side: Circuit & Oscilloscope -->
+        <div class="flex-1 flex flex-col bg-gray-100 relative">
+            
+            <!-- Message Overlay -->
+            <div id="message-box" class="absolute top-4 left-1/2 transform -translate-x-1/2 bg-blue-100 border border-blue-400 text-blue-700 px-6 py-2 rounded-full shadow-lg z-50 transition-all duration-300 opacity-0 translate-y-[-20px] pointer-events-none text-center font-semibold text-sm">
+                Chào mừng đến với bài thực hành!
+            </div>
+
+            <!-- Circuit Area (Top Half) -->
+            <div class="h-[55%] border-b border-gray-300 bg-white p-4 flex flex-col relative shadow-inner">
+                <h3 class="text-sm font-bold text-gray-500 uppercase tracking-wider mb-2">Sơ đồ mạch thực hành</h3>
+                <div class="flex-1 flex items-center justify-center relative w-full h-full">
+                    <!-- SVG Sơ đồ mạch -->
+                    <svg id="circuit-svg" width="100%" height="100%" viewBox="0 0 800 450" class="max-w-4xl mx-auto" preserveAspectRatio="xMidYMid meet">
+                        <defs>
+                            <g id="diode-symbol">
+                                <polygon points="-12,-12 12,0 -12,12" fill="white" stroke="black" stroke-width="2"/>
+                                <line x1="12" y1="-12" x2="12" y2="12" stroke="black" stroke-width="2"/>
+                            </g>
+                            <g id="terminal">
+                                <circle cx="0" cy="0" r="6" fill="white" stroke="black" stroke-width="2"/>
+                                <circle cx="0" cy="0" r="2" fill="black"/>
+                            </g>
+                            <circle id="node" cx="0" cy="0" r="4" fill="black" />
+                        </defs>
+
+                        <!-- Labels C, D, AC IN -->
+                        <text x="30" y="85" font-size="18" font-family="monospace" font-weight="bold">C</text>
+                        <text x="30" y="285" font-size="18" font-family="monospace" font-weight="bold">D</text>
+                        <text x="25" y="160" font-size="16">AC IN</text>
+                        <text x="25" y="180" font-size="16">~9V</text>
+                        
+                        <text x="400" y="420" font-size="16" text-anchor="middle" font-family="serif" font-weight="bold">Bảng mạch A1-3b: Mạch chỉnh lưu cầu dùng Diode</text>
+                        
+                        <!-- Đường dây dẫn -->
+                        <g stroke="black" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                            <!-- AC Input Lines -->
+                            <line id="wire-ac-1" x1="60" y1="80" x2="250" y2="80" />
+                            <line id="wire-ac-2" x1="60" y1="280" x2="250" y2="280" />
+                            
+                            <!-- Bridge Wires (Diamond) -->
+                            <line id="wire-d3" x1="150" y1="180" x2="250" y2="80" />  <!-- Trái lên Trên -->
+                            <line id="wire-d5" x1="250" y1="80" x2="350" y2="180" />  <!-- Trên xuống Phải -->
+                            <line id="wire-d4" x1="150" y1="180" x2="250" y2="280" /> <!-- Trái xuống Dưới -->
+                            <line id="wire-d6" x1="250" y1="280" x2="350" y2="180" /> <!-- Dưới lên Phải -->
+                            
+                            <!-- Negative Rail (Bottom) -->
+                            <line id="wire-gnd-1" x1="150" y1="180" x2="150" y2="360" />
+                            <line id="wire-gnd-2" x1="150" y1="360" x2="640" y2="360" />
+                            
+                            <!-- Positive to T -->
+                            <line id="wire-pos-1" x1="350" y1="180" x2="430" y2="180" />
+                            
+                            <!-- Terminal 2 branching -->
+                            <line id="wire-t2-1" x1="480" y1="180" x2="540" y2="180" />
+                            <line id="wire-t2-2" x1="540" y1="180" x2="540" y2="250" />
+                            <line id="wire-t2-3" x1="540" y1="250" x2="540" y2="280" /> <!-- To R1 Top -->
+                            <line id="wire-r1-gnd" x1="540" y1="340" x2="540" y2="360" /> <!-- From R1 Bot to Rail -->
+                            
+                            <line x1="540" y1="250" x2="640" y2="250" /> <!-- To Osc In -->
+                            <line x1="640" y1="290" x2="640" y2="360" /> <!-- From Osc GND to Rail -->
+                        </g>
+
+                        <!-- Terminals & Nodes -->
+                        <use href="#terminal" x="60" y="80" />
+                        <use href="#terminal" x="60" y="280" />
+                        
+                        <use href="#node" x="250" y="80" />  <!-- Top Node -->
+                        <use href="#node" x="250" y="280" /> <!-- Bot Node -->
+                        <use href="#node" x="150" y="180" /> <!-- Left Node (-) -->
+                        <use href="#node" x="350" y="180" /> <!-- Right Node (+) -->
+                        
+                        <!-- Ký hiệu nguồn & cực cầu -->
+                        <text x="245" y="70" font-size="16">~</text>
+                        <text x="245" y="300" font-size="16">~</text>
+                        <text x="135" y="175" font-size="20" font-weight="bold">-</text>
+                        <text x="360" y="175" font-size="20" font-weight="bold">+</text>
+                        <text x="220" y="185" font-size="14" font-family="monospace">1N4007</text>
+                        
+                        <!-- Diodes -->
+                        <!-- D3 (Trái -> Trên) -->
+                        <g id="diode-D3" transform="translate(200, 130) rotate(-45)">
+                            <use href="#diode-symbol" class="transition-all duration-300"/>
+                            <text x="-25" y="-15" font-size="16" transform="rotate(45)">D3</text>
+                        </g>
+                        <!-- D5 (Trên -> Phải) -->
+                        <g id="diode-D5" transform="translate(300, 130) rotate(45)">
+                            <use href="#diode-symbol" class="transition-all duration-300"/>
+                            <text x="10" y="-15" font-size="16" transform="rotate(-45)">D5</text>
+                            <!-- Chữ báo lỗi (ẩn mặc định) -->
+                            <text id="fault-label-d5" x="-15" y="-30" font-size="14" fill="red" font-weight="bold" transform="rotate(-45)" class="hidden">PAN</text>
+                        </g>
+                        <!-- D4 (Trái -> Dưới) -->
+                        <g id="diode-D4" transform="translate(200, 230) rotate(45)">
+                            <use href="#diode-symbol" class="transition-all duration-300"/>
+                            <text x="-25" y="25" font-size="16" transform="rotate(-45)">D4</text>
+                        </g>
+                        <!-- D6 (Dưới -> Phải) -->
+                        <g id="diode-D6" transform="translate(300, 230) rotate(-45)">
+                            <use href="#diode-symbol" class="transition-all duration-300"/>
+                            <text x="10" y="25" font-size="16" transform="rotate(45)">D6</text>
+                        </g>
+                        
+                        <!-- Công tắc T -->
+                        <text x="425" y="160" font-size="16" font-family="monospace">T</text>
+                        <text x="475" y="160" font-size="16" font-family="monospace">2</text>
+                        <use href="#terminal" x="430" y="180" />
+                        <use href="#terminal" x="480" y="180" />
+                        <line id="switch-arm" x1="430" y1="180" x2="470" y2="150" stroke="black" stroke-width="3" stroke-linecap="round" class="transition-all duration-300" />
+                        
+                        <!-- R1 -->
+                        <use href="#node" x="540" y="250" />
+                        <use href="#node" x="540" y="360" />
+                        <rect x="525" y="280" width="30" height="60" fill="white" stroke="black" stroke-width="2" />
+                        <text x="495" y="310" font-size="14">R1</text>
+                        <text x="490" y="330" font-size="14">3K3</text>
+                        
+                        <!-- Oscilloscope Drawing -->
+                        <rect x="620" y="80" width="160" height="260" fill="white" stroke="#333" stroke-width="2" rx="4"/>
+                        <rect x="635" y="95" width="130" height="100" fill="#f8f9fa" stroke="#999" stroke-width="1"/>
+                        <text x="645" y="220" font-size="15" font-weight="bold">Osciloscope</text>
+                        
+                        <use href="#terminal" x="640" y="250" />
+                        <text x="625" y="270" font-size="13">In</text>
+                        
+                        <use href="#terminal" x="640" y="290" />
+                        <g stroke="black" stroke-width="2">
+                            <line x1="630" y1="310" x2="650" y2="310" />
+                            <line x1="635" y1="316" x2="645" y2="316" />
+                            <line x1="638" y1="322" x2="642" y2="322" />
+                        </g>
+                        
+                        <use href="#terminal" x="720" y="250" />
+                        <text x="710" y="270" font-size="13">Ext</text>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- STREAMING_CHUNK:Giao diện Dao động ký và Điều khiển... -->
+            <!-- Oscilloscope Area (Bottom Half) -->
+            <div class="h-[45%] bg-[#1a1a1a] p-4 flex gap-4 text-white rounded-tl-xl shadow-[0_-5px_15px_rgba(0,0,0,0.2)]">
+                
+                <!-- Screen -->
+                <div class="flex-1 osc-screen relative">
+                    <div class="osc-grid"></div>
+                    <div class="osc-center-line"></div>
+                    <div class="osc-center-vline"></div>
+                    <canvas id="osc-canvas" class="absolute top-0 left-0 w-full h-full z-10"></canvas>
+                    
+                    <!-- Overlay Data -->
+                    <div class="absolute top-3 left-3 z-20 text-[11px] font-mono text-green-400 opacity-90 tracking-wider">
+                        <div id="osc-data-ch1" class="text-yellow-400 hidden">CH1 (Vào): 5.00V/div</div>
+                        <div id="osc-data-ch2" class="text-cyan-400 hidden">CH2 (Ra): 5.00V/div</div>
+                        <div>Time: 5.0ms/div</div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="w-56 bg-[#2a2a2a] p-3 rounded-lg border border-[#444] flex flex-col shadow-inner overflow-y-auto">
+                    <h4 class="text-xs font-bold text-gray-300 mb-3 text-center border-b border-[#555] pb-2 shrink-0">ĐIỀU KHIỂN DAO ĐỘNG KÝ</h4>
+                    
+                    <div class="space-y-3 flex-1 flex flex-col">
+                        <!-- CH1 Control -->
+                        <div class="bg-[#111] p-2 rounded border border-[#333]">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-[11px] text-yellow-400 font-bold">CH1 (AC In)</span>
+                                <div id="led-ch1" class="w-2 h-2 rounded-full bg-gray-600"></div>
+                            </div>
+                            <div class="text-[10px] text-gray-500 leading-tight">Màu vàng, đo trước cầu</div>
+                        </div>
+
+                        <!-- CH2 Control -->
+                        <div class="bg-[#111] p-2 rounded border border-[#333]">
+                            <div class="flex items-center justify-between mb-1">
+                                <span class="text-[11px] text-cyan-400 font-bold">CH2 (DC Out)</span>
+                                <div id="led-ch2" class="w-2 h-2 rounded-full bg-gray-600"></div>
+                            </div>
+                            <div class="text-[10px] text-gray-500 leading-tight">Màu xanh, đo trên R1</div>
+                        </div>
+
+                        <!-- Đồng hồ đo -->
+                        <div id="voltmeter-panel" class="bg-[#111] p-2 rounded border border-[#333] hidden transition-opacity duration-500 opacity-0">
+                            <div class="text-[11px] text-white font-bold mb-2 border-b border-[#444] pb-1 text-center">ĐỒNG HỒ ĐO (RMS)</div>
+                            <div class="flex justify-between items-center mb-1.5">
+                                <span class="text-[11px] text-gray-400">AC In:</span>
+                                <span class="text-[13px] text-yellow-400 font-mono bg-black px-2 py-0.5 rounded border border-gray-700 shadow-inner" id="val-vac">0.00V</span>
+                            </div>
+                            <div class="flex justify-between items-center">
+                                <span class="text-[11px] text-gray-400">DC Out:</span>
+                                <span class="text-[13px] text-cyan-400 font-mono bg-black px-2 py-0.5 rounded border border-gray-700 shadow-inner" id="val-vdc">0.00V</span>
+                            </div>
+                        </div>
+
+                        <!-- Điều khiển lỗi (Pan) -->
+                        <div id="fault-panel" class="bg-[#111] p-2 rounded border border-red-900/50 hidden">
+                            <div class="text-[11px] text-red-400 font-bold mb-1 border-b border-[#444] pb-1">MÔ PHỎNG HƯ HỎNG (PAN)</div>
+                            <select id="fault-select" class="w-full bg-black text-gray-300 text-[11px] p-1 border border-[#444] rounded outline-none focus:border-red-500" onchange="app.setFault(this.value)">
+                                <option value="NORMAL">Mạch bình thường</option>
+                                <option value="D5_OPEN">Pan 1: Đứt Diode D5 (Hở mạch)</option>
+                                <option value="D5_SHORT">Pan 2: Chập Diode D5 (Ngắn mạch)</option>
+                            </select>
+                        </div>
+
+                        <!-- Spacer -->
+                        <div class="flex-1"></div>
+
+                        <!-- Nút Tạm Dừng -->
+                        <button id="btn-pause-osc" class="mt-2 w-full bg-green-600 hover:bg-green-500 text-white text-[11px] font-bold py-1.5 rounded shadow transition-colors hidden shrink-0" onclick="app.togglePauseOsc()">
+                            ▶ Tiếp tục
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- STREAMING_CHUNK:Bảng tổng kết đánh giá kết quả... -->
+            <!-- Result Modal (Hidden by default) -->
+            <div id="result-modal" class="absolute inset-0 bg-black/80 z-[60] flex items-center justify-center hidden opacity-0 transition-opacity">
+                <div class="bg-white rounded-xl shadow-2xl p-6 max-w-lg w-full transform scale-95 transition-transform" id="result-content">
+                    <h2 class="text-xl font-bold text-blue-800 mb-4 border-b pb-2">Kết quả phân tích sóng (Lý thuyết vs Thực tế)</h2>
+                    
+                    <div class="space-y-3 text-sm text-gray-800">
+                        <p><strong>Nguồn vào (AC):</strong> $U_{\text{rms}} = 9V \rightarrow U_{\text{peak}} \approx 9 \times \sqrt{2} \approx 12.7V$</p>
+                        <p><strong>Chu kỳ nguồn:</strong> $T = 20ms$ (Giả sử tần số $f = 50Hz$)</p>
+                        <hr class="my-2">
+                        <p><strong>Mạch chỉnh lưu cầu:</strong> Sử dụng 4 diode 1N4007.</p>
+                        <p><strong>Đặc điểm sóng đầu ra (CH2):</strong></p>
+                        <ul class="list-disc pl-5 space-y-1">
+                            <li>Dạng sóng: Nhấp nhô toàn sóng (2 nửa chu kỳ đều có điện áp dương).</li>
+                            <li>Sụt áp qua 2 diode phân cực thuận: $2 \times U_d \approx 2 \times 0.7V = 1.4V$</li>
+                            <li><strong>Biên độ đỉnh đầu ra:</strong> $U_{\text{out(peak)}} \approx 12.7V - 1.4V = 11.3V$</li>
+                            <li><strong>Điện áp hiệu dụng (RMS):</strong> $U_{\text{out(rms)}} = \frac{U_{\text{out(peak)}}}{\sqrt{2}} \approx \frac{11.3}{\sqrt{2}} \approx 8.01V$</li>
+                            <li><strong>Tần số gợn sóng:</strong> $f_{\text{out}} = 2 \times f_{\text{in}} = 100Hz \rightarrow T_{\text{out}} = 10ms$</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="mt-6 flex justify-end">
+                        <button class="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded shadow transition-colors" onclick="app.closeResults()">Hoàn thành</button>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- STREAMING_CHUNK:Khởi tạo Logic Ứng dụng JavaScript... -->
+    <!-- App Logic -->
+    <script>
+        const app = {
+            state: {
+                step: 1,
+                powerOn: false,
+                switchTClosed: false,
+                ch1Active: false,
+                ch2Active: false,
+                time: 0,
+                animationId: null,
+                isPaused: true, // Bắt đầu ở trạng thái pause chờ step 5
+                flowState: 'none',
+                fault: 'NORMAL' // NORMAL, D5_OPEN, D5_SHORT
+            },
+            
+            osc: {
+                canvas: null,
+                ctx: null,
+                width: 0,
+                height: 0,
+                vMax: 18, 
+            },
+
+            init() {
+                this.osc.canvas = document.getElementById('osc-canvas');
+                this.osc.ctx = this.osc.canvas.getContext('2d');
+                this.resizeCanvas();
+                window.addEventListener('resize', () => this.resizeCanvas());
+                
+                this.enableStep(1);
+                this.startOscilloscope();
+                this.showMessage("Bước 1: Hãy nhấn 'Xác nhận sơ đồ' để bắt đầu lắp mạch.", 4000);
+            },
+
+            resizeCanvas() {
+                const parent = this.osc.canvas.parentElement;
+                this.osc.width = parent.clientWidth;
+                this.osc.height = parent.clientHeight;
+                this.osc.canvas.width = this.osc.width;
+                this.osc.canvas.height = this.osc.height;
+            },
+
+            showMessage(text, duration = 3000) {
+                const box = document.getElementById('message-box');
+                box.textContent = text;
+                box.style.opacity = '1';
+                box.style.transform = 'translate(-50%, 0)';
+                
+                if(this.msgTimeout) clearTimeout(this.msgTimeout);
+                this.msgTimeout = setTimeout(() => {
+                    box.style.opacity = '0';
+                    box.style.transform = 'translate(-50%, -20px)';
+                }, duration);
+            },
+
+            // STREAMING_CHUNK:Quản lý chuyển đổi các bước thực hành...
+            enableStep(step) {
+                this.state.step = step;
+                
+                // Mở khóa các nút theo Step
+                if (step >= 2) {
+                    const btn = document.getElementById('btn-step-2');
+                    btn.disabled = false;
+                    btn.classList.remove('cursor-not-allowed', 'bg-gray-100', 'text-gray-400');
+                    if (step === 2) btn.classList.add('bg-blue-100', 'text-blue-700', 'hover:bg-blue-200');
+                }
+                if (step >= 3) {
+                    const sw = document.getElementById('switch-power');
+                    sw.disabled = false;
+                    sw.parentElement.classList.remove('cursor-not-allowed');
+                }
+                if (step >= 4) {
+                    const btn = document.getElementById('btn-toggle-t');
+                    btn.disabled = false;
+                    btn.classList.remove('cursor-not-allowed', 'bg-gray-200', 'text-gray-500');
+                    if (!this.state.switchTClosed) btn.classList.add('bg-yellow-400', 'text-yellow-900', 'hover:bg-yellow-500');
+                }
+                if (step >= 5) {
+                    [1, 2].forEach(ch => {
+                        const btn = document.getElementById(`btn-ch${ch}`);
+                        btn.disabled = false;
+                        btn.classList.remove('cursor-not-allowed', 'bg-gray-100', 'text-gray-400');
+                        if(ch === 1 && !this.state.ch1Active) btn.classList.add('bg-white', 'text-yellow-600', 'border-yellow-400', 'hover:bg-yellow-50');
+                        if(ch === 2 && !this.state.ch2Active) btn.classList.add('bg-white', 'text-cyan-600', 'border-cyan-400', 'hover:bg-cyan-50');
+                    });
+                    document.getElementById('btn-pause-osc').classList.remove('hidden');
+                    
+                    const voltmeter = document.getElementById('voltmeter-panel');
+                    voltmeter.classList.remove('hidden');
+                    setTimeout(() => voltmeter.classList.remove('opacity-0'), 50);
+                    
+                    if (step === 5) this.togglePauseOsc(); // Auto play khi tới step 5
+                }
+                if (step >= 6) {
+                    const btn = document.getElementById('btn-step-6');
+                    btn.disabled = false;
+                    btn.classList.remove('cursor-not-allowed');
+                    btn.classList.add('bg-blue-600', 'text-white', 'hover:bg-blue-700');
+                    
+                    // Hiện tính năng PAN
+                    document.getElementById('fault-panel').classList.remove('hidden');
+                }
+
+                // Cập nhật hiệu ứng Focus cho menu trái
+                document.querySelectorAll('.step-card').forEach((el, index) => {
+                    const s = index + 1;
+                    const num = el.querySelector('.step-num');
+                    const content = el.querySelector('div:nth-child(2)');
+                    
+                    if (s === step) {
+                        el.classList.remove('opacity-50');
+                        el.classList.add('opacity-100');
+                        num.classList.replace('bg-gray-300', 'bg-blue-600');
+                        num.classList.replace('text-gray-600', 'text-white');
+                        content.classList.replace('border-gray-200', 'border-blue-600');
+                        content.classList.add('border-2');
+                    } else if (s < step) {
+                        el.classList.remove('opacity-50');
+                        el.classList.add('opacity-100');
+                        num.classList.replace('bg-blue-600', 'bg-green-500');
+                        content.classList.remove('border-2', 'border-blue-600');
+                        content.classList.add('border', 'border-gray-200');
+                    }
+                });
+            },
+
+            selectStep(step) {
+                if (step > this.state.step) {
+                    this.showMessage(`Vui lòng hoàn thành bước hiện tại trước!`, 2000);
+                }
+            },
+
+            completeStep(stepNumber, event) {
+                if(event) {
+                    event.target.classList.replace('bg-blue-100', 'bg-green-100');
+                    event.target.classList.replace('text-blue-700', 'text-green-700');
+                    event.target.innerText = "Đã hoàn thành";
+                }
+
+                if (stepNumber === 1 && this.state.step === 1) {
+                    this.showMessage("Đã lắp mạch. Bước 2: Kiểm tra các diode.", 3000);
+                    this.enableStep(2);
+                } 
+                else if (stepNumber === 2 && this.state.step === 2) {
+                    this.showMessage("Diode mắc đúng chiều. Bước 3: Cấp nguồn AC.", 3000);
+                    
+                    // Highlight nháy sáng diode
+                    const diodes = ['diode-D3', 'diode-D4', 'diode-D5', 'diode-D6'];
+                    diodes.forEach((id, idx) => {
+                        setTimeout(() => {
+                            const el = document.getElementById(id);
+                            if(el) {
+                                el.querySelector('use').setAttribute('stroke', '#3b82f6');
+                                el.querySelector('use').setAttribute('stroke-width', '4');
+                                setTimeout(() => {
+                                    el.querySelector('use').setAttribute('stroke', 'black');
+                                    el.querySelector('use').setAttribute('stroke-width', '2');
+                                }, 800);
+                            }
+                        }, idx * 200);
+                    });
+
+                    setTimeout(() => this.enableStep(3), 1500);
+                }
+            },
+
+            // STREAMING_CHUNK:Xử lý Công tắc Nguồn và Chốt T...
+            togglePower() {
+                if(this.state.step < 3) return;
+                
+                this.state.powerOn = document.getElementById('switch-power').checked;
+                if (this.state.powerOn) {
+                    this.showMessage("Đã cấp nguồn 9V AC.", 2000);
+                    
+                    if (this.state.step === 3) {
+                        setTimeout(() => {
+                            this.enableStep(4);
+                            this.showMessage("Bước 4: Đóng chốt T để kết nối tải.", 3000);
+                        }, 1000);
+                    }
+                }
+            },
+
+            toggleSwitchT() {
+                if(this.state.step < 4) return;
+                
+                this.state.switchTClosed = !this.state.switchTClosed;
+                const arm = document.getElementById('switch-arm');
+                const btn = document.getElementById('btn-toggle-t');
+                
+                if (this.state.switchTClosed) {
+                    arm.setAttribute('x2', '480'); 
+                    arm.setAttribute('y2', '180');
+                    
+                    btn.innerText = "ĐÓNG (Kín mạch)";
+                    btn.classList.replace('bg-yellow-400', 'bg-green-600');
+                    btn.classList.replace('text-yellow-900', 'text-white');
+                    btn.classList.replace('hover:bg-yellow-500', 'hover:bg-green-700');
+                    
+                    if(this.state.powerOn) this.showMessage("Mạch đã kín. Dòng điện qua tải R1.", 2000);
+
+                    if (this.state.step === 4) {
+                        setTimeout(() => {
+                            this.enableStep(5);
+                            this.showMessage("Bước 5: Bật các kênh CH1, CH2 trên Oscilloscope.", 4000);
+                        }, 1000);
+                    }
+                } else {
+                    arm.setAttribute('x2', '470'); 
+                    arm.setAttribute('y2', '150');
+                    
+                    btn.innerText = "MỞ (Hở mạch)";
+                    btn.classList.replace('bg-green-600', 'bg-yellow-400');
+                    btn.classList.replace('text-white', 'text-yellow-900');
+                    btn.classList.replace('hover:bg-green-700', 'hover:bg-yellow-500');
+                }
+            },
+
+            toggleChannel(ch) {
+                if(this.state.step < 5) return;
+
+                if (ch === 1) {
+                    this.state.ch1Active = !this.state.ch1Active;
+                    const led = document.getElementById('led-ch1');
+                    const data = document.getElementById('osc-data-ch1');
+                    const btn = document.getElementById('btn-ch1');
+                    
+                    if (this.state.ch1Active) {
+                        led.classList.replace('bg-gray-600', 'bg-yellow-400');
+                        led.classList.add('shadow-[0_0_8px_#facc15]');
+                        data.classList.remove('hidden');
+                        btn.classList.add('ring-2', 'ring-yellow-400');
+                    } else {
+                        led.classList.replace('bg-yellow-400', 'bg-gray-600');
+                        led.classList.remove('shadow-[0_0_8px_#facc15]');
+                        data.classList.add('hidden');
+                        btn.classList.remove('ring-2', 'ring-yellow-400');
+                    }
+                } else {
+                    this.state.ch2Active = !this.state.ch2Active;
+                    const led = document.getElementById('led-ch2');
+                    const data = document.getElementById('osc-data-ch2');
+                    const btn = document.getElementById('btn-ch2');
+                    
+                    if (this.state.ch2Active) {
+                        led.classList.replace('bg-gray-600', 'bg-cyan-400');
+                        led.classList.add('shadow-[0_0_8px_#22d3ee]');
+                        data.classList.remove('hidden');
+                        btn.classList.add('ring-2', 'ring-cyan-400');
+                    } else {
+                        led.classList.replace('bg-cyan-400', 'bg-gray-600');
+                        led.classList.remove('shadow-[0_0_8px_#22d3ee]');
+                        data.classList.add('hidden');
+                        btn.classList.remove('ring-2', 'ring-cyan-400');
+                    }
+                }
+
+                if (this.state.step === 5 && (this.state.ch1Active || this.state.ch2Active)) {
+                    setTimeout(() => {
+                        this.enableStep(6);
+                        this.showMessage("Bước 6: Xem kết quả phân tích dạng sóng.", 4000);
+                    }, 2500);
+                }
+            },
+
+            togglePauseOsc() {
+                this.state.isPaused = !this.state.isPaused;
+                const btn = document.getElementById('btn-pause-osc');
+                if (this.state.isPaused) {
+                    btn.innerHTML = '▶ Tiếp tục';
+                    btn.classList.replace('bg-gray-600', 'bg-green-600');
+                    btn.classList.replace('hover:bg-gray-500', 'hover:bg-green-500');
+                } else {
+                    btn.innerHTML = '⏸ Tạm dừng';
+                    btn.classList.replace('bg-green-600', 'bg-gray-600');
+                    btn.classList.replace('hover:bg-green-500', 'hover:bg-gray-500');
+                }
+            },
+
+            // STREAMING_CHUNK:Cập nhật Đồng hồ VOM ảo...
+            updateMeters() {
+                const vac = document.getElementById('val-vac');
+                const vdc = document.getElementById('val-vdc');
+                if (!vac || !vdc) return;
+                
+                if (this.state.powerOn) {
+                    const fluctuate = () => (Math.random() * 0.04 - 0.02);
+                    
+                    if (this.state.fault === 'D5_SHORT') {
+                        // Khi chập, AC bị tụt nguồn và hiển thị lỗi
+                        vac.innerText = '0.00V';
+                        vdc.innerText = '0.00V';
+                        vac.classList.add('text-red-500');
+                        vdc.classList.add('text-red-500');
+                    } else {
+                        vac.classList.remove('text-red-500');
+                        vdc.classList.remove('text-red-500');
+                        vac.innerText = (9.00 + fluctuate()).toFixed(2) + 'V';
+                        
+                        if (this.state.switchTClosed) {
+                            if (this.state.fault === 'NORMAL') {
+                                vdc.innerText = (8.01 + fluctuate()).toFixed(2) + 'V';
+                            } else if (this.state.fault === 'D5_OPEN') {
+                                // Mất 1 nửa chu kỳ, điện áp RMS giảm
+                                vdc.innerText = (5.66 + fluctuate()).toFixed(2) + 'V';
+                            }
+                        } else {
+                            vdc.innerText = '0.00V';
+                        }
+                    }
+                } else {
+                    vac.innerText = '0.00V';
+                    vdc.innerText = '0.00V';
+                    vac.classList.remove('text-red-500');
+                    vdc.classList.remove('text-red-500');
+                }
+            },
+
+            // STREAMING_CHUNK:Quản lý Mô phỏng Hư hỏng (Pan)...
+            setFault(val) {
+                this.state.fault = val;
+                const d5 = document.getElementById('diode-D5');
+                const lbl = document.getElementById('fault-label-d5');
+                const overlay = document.getElementById('short-circuit-overlay');
+                
+                // Reset styles
+                d5.querySelector('use').classList.remove('fault-diode', 'shorted-diode');
+                lbl.classList.add('hidden');
+                overlay.classList.add('hidden');
+
+                if (val === 'D5_OPEN') {
+                    d5.querySelector('use').classList.add('fault-diode');
+                    lbl.textContent = 'ĐỨT';
+                    lbl.classList.remove('hidden');
+                    this.showMessage("PAN: Diode D5 bị đứt. Mạch chỉ chỉnh lưu bán kỳ.", 4000);
+                } 
+                else if (val === 'D5_SHORT') {
+                    d5.querySelector('use').classList.add('shorted-diode');
+                    lbl.textContent = 'CHẬP';
+                    lbl.classList.remove('hidden');
+                    this.showMessage("PAN: Diode D5 bị chập xuyên thủng!", 4000);
+                }
+            },
+
+            // STREAMING_CHUNK:Tính toán và vẽ Hoạt ảnh Dòng điện...
+            updateCircuitFlow() {
+                // Xóa mọi class flow
+                const allWires = [
+                    'wire-ac-1', 'wire-ac-2', 'wire-d5', 'wire-d6', 'wire-d4', 'wire-d3',
+                    'wire-pos-1', 'wire-t2-1', 'wire-t2-2', 'wire-t2-3', 'wire-r1-gnd',
+                    'wire-gnd-1', 'wire-gnd-2', 'switch-arm'
+                ];
+                allWires.forEach(id => {
+                    const el = document.getElementById(id);
+                    if (el) el.classList.remove('curr-red-fwd', 'curr-red-rev', 'curr-blue-fwd', 'curr-blue-rev', 'curr-short');
+                });
+
+                if (!this.state.powerOn) return;
+
+                const vin = Math.sin(this.state.time);
+                const isPos = vin > 0;
+                
+                const applyFlow = (wires, type) => {
+                    wires.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.classList.add(type);
+                    });
+                };
+
+                const loadFWD = ['wire-pos-1', 'switch-arm', 'wire-t2-1', 'wire-t2-2', 'wire-t2-3', 'wire-r1-gnd'];
+                const returnREV = ['wire-gnd-1', 'wire-gnd-2'];
+
+                if (!this.state.switchTClosed) {
+                    if (this.state.fault === 'D5_SHORT') {
+                        // Chập nguồn ngay cả khi hở chốt T (ở nửa chu kỳ âm)
+                        if (!isPos) {
+                            applyFlow(['wire-ac-2', 'wire-d6', 'wire-d5', 'wire-ac-1'], 'curr-short');
+                            document.getElementById('short-circuit-overlay').classList.remove('hidden');
+                        } else {
+                            document.getElementById('short-circuit-overlay').classList.add('hidden');
+                            applyFlow(['wire-ac-1'], 'curr-red-fwd');
+                            applyFlow(['wire-ac-2'], 'curr-red-rev');
+                        }
+                    } else {
+                        document.getElementById('short-circuit-overlay').classList.add('hidden');
+                        applyFlow(['wire-ac-1'], isPos ? 'curr-red-fwd' : 'curr-blue-rev');
+                        applyFlow(['wire-ac-2'], isPos ? 'curr-red-rev' : 'curr-blue-fwd');
+                    }
+                } 
+                else {
+                    if (this.state.fault === 'D5_SHORT') {
+                        if (isPos) {
+                            // C -> D5(chập) -> R1 -> D4 -> D
+                            document.getElementById('short-circuit-overlay').classList.add('hidden');
+                            applyFlow(['wire-ac-1', 'wire-d5', 'wire-d4', ...loadFWD], 'curr-red-fwd');
+                            applyFlow(['wire-ac-2', ...returnREV], 'curr-red-rev');
+                        } else {
+                            // NGẮN MẠCH: D -> D6 -> D5(chập) -> C
+                            applyFlow(['wire-ac-2', 'wire-d6', 'wire-d5', 'wire-ac-1'], 'curr-short');
+                            document.getElementById('short-circuit-overlay').classList.remove('hidden');
+                        }
+                    } 
+                    else if (this.state.fault === 'D5_OPEN') {
+                        document.getElementById('short-circuit-overlay').classList.add('hidden');
+                        if (isPos) {
+                            // Không có dòng
+                            applyFlow(['wire-ac-1'], 'curr-red-fwd'); // Chỉ nháy đầu dây
+                        } else {
+                            // D -> D6 -> R1 -> D3 -> C
+                            applyFlow(['wire-ac-2', 'wire-d6', 'wire-d3', ...loadFWD], 'curr-blue-fwd');
+                            applyFlow(['wire-ac-1', ...returnREV], 'curr-blue-rev');
+                        }
+                    } 
+                    else {
+                        // NORMAL
+                        document.getElementById('short-circuit-overlay').classList.add('hidden');
+                        if (isPos) {
+                            // Nửa chu kỳ dương (Màu Đỏ): C -> D5 -> R1 -> D4 -> D
+                            applyFlow(['wire-ac-1', 'wire-d5', 'wire-d4', ...loadFWD], 'curr-red-fwd');
+                            applyFlow(['wire-ac-2', ...returnREV], 'curr-red-rev');
+                        } else {
+                            // Nửa chu kỳ âm (Màu Xanh): D -> D6 -> R1 -> D3 -> C
+                            applyFlow(['wire-ac-2', 'wire-d6', 'wire-d3', ...loadFWD], 'curr-blue-fwd');
+                            applyFlow(['wire-ac-1', ...returnREV], 'curr-blue-rev');
+                        }
+                    }
+                }
+            },
+
+            // STREAMING_CHUNK:Vẽ Đồ thị Dao động ký...
+            startOscilloscope() {
+                const draw = () => {
+                    this.drawWaves();
+                    
+                    if (!this.state.isPaused) {
+                        this.state.time += 0.05; 
+                    }
+                    this.updateCircuitFlow();
+                    
+                    this.state.animationId = requestAnimationFrame(draw);
+                };
+                draw();
+                
+                setInterval(() => {
+                    if (this.state.step >= 5) this.updateMeters();
+                }, 300);
+            },
+
+            drawWaves() {
+                const { ctx, width, height, vMax } = this.osc;
+                ctx.clearRect(0, 0, width, height);
+
+                const centerY = height / 2;
+                const pixelsPerVolt = (height / 2) / vMax;
+                
+                const Vrms = 9;
+                const VpeakIn = Vrms * Math.sqrt(2); 
+                const Vdrop = 1.4; 
+                
+                const numCycles = 2;
+                const angularFreq = (numCycles * 2 * Math.PI) / width;
+
+                // CH1 (Nguồn AC vào)
+                if (this.state.ch1Active) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#facc15';
+                    ctx.lineWidth = 2;
+                    
+                    for (let x = 0; x < width; x++) {
+                        let y = centerY;
+                        if (this.state.powerOn) {
+                            if (this.state.fault === 'D5_SHORT' && Math.sin((x * angularFreq) + this.state.time) < 0) {
+                                // Khi chập mạch nửa chu kỳ âm, điện áp tụt về 0
+                                y = centerY;
+                            } else {
+                                const t = (x * angularFreq) + this.state.time;
+                                const voltage = VpeakIn * Math.sin(t);
+                                y = centerY - (voltage * pixelsPerVolt);
+                            }
+                        }
+                        if (x === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+
+                // CH2 (Tín hiệu sau cầu chỉnh lưu DC)
+                if (this.state.ch2Active) {
+                    ctx.beginPath();
+                    ctx.strokeStyle = '#22d3ee';
+                    ctx.lineWidth = 2;
+                    
+                    for (let x = 0; x < width; x++) {
+                        let y = centerY;
+                        if (this.state.powerOn && this.state.switchTClosed) {
+                            const t = (x * angularFreq) + this.state.time;
+                            const vin = VpeakIn * Math.sin(t);
+                            let vout = 0;
+
+                            if (this.state.fault === 'NORMAL') {
+                                vout = Math.abs(vin) - Vdrop;
+                                if (vout < 0) vout = 0; 
+                            } 
+                            else if (this.state.fault === 'D5_OPEN') {
+                                if (vin > 0) vout = 0; // Mất nửa dương
+                                else {
+                                    vout = Math.abs(vin) - Vdrop;
+                                    if (vout < 0) vout = 0;
+                                }
+                            }
+                            else if (this.state.fault === 'D5_SHORT') {
+                                if (vin > 0) {
+                                    vout = Math.abs(vin) - 0.7; // Chỉ qua 1 diode D4
+                                    if (vout < 0) vout = 0;
+                                } else {
+                                    vout = 0; // Chập nguồn
+                                }
+                            }
+
+                            y = centerY - (vout * pixelsPerVolt);
+                        }
+                        if (x === 0) ctx.moveTo(x, y);
+                        else ctx.lineTo(x, y);
+                    }
+                    ctx.stroke();
+                }
+            },
+
+            // STREAMING_CHUNK:Quản lý Modal Kết quả...
+            showResults(event) {
+                if(event) {
+                    event.target.innerText = "Đã xem kết quả";
+                    event.target.classList.replace('bg-blue-600', 'bg-green-600');
+                    event.target.classList.replace('hover:bg-blue-700', 'hover:bg-green-700');
+                }
+
+                const modal = document.getElementById('result-modal');
+                const content = document.getElementById('result-content');
+                
+                modal.classList.remove('hidden');
+                void modal.offsetWidth; 
+                modal.classList.remove('opacity-0');
+                content.classList.remove('scale-95');
+                
+                if (window.MathJax) MathJax.typesetPromise();
+            },
+
+            closeResults() {
+                const modal = document.getElementById('result-modal');
+                const content = document.getElementById('result-content');
+                
+                modal.classList.add('opacity-0');
+                content.classList.add('scale-95');
+                
+                setTimeout(() => {
+                    modal.classList.add('hidden');
+                    this.showMessage("Chúc mừng bạn đã hoàn thành bài thực hành! Bạn có thể thử các Pan hư hỏng ở bảng điều khiển.", 5000);
+                    document.querySelector('#step-6 .step-num').classList.replace('bg-blue-600', 'bg-green-500');
+                }, 300);
+            }
+        };
+
+        window.onload = () => {
+            app.init();
+        };
+    </script>
+</body>
+</html>
+```eof
